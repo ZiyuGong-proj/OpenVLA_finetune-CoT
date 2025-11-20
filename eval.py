@@ -19,6 +19,7 @@ DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("
 def build_frame_cot_prompt(task_description: str, step_idx: int) -> str:
     return (
         "You are a robot agent that must reason about the current frame only.\n"
+        "Always respond in clear, fluent English using only standard ASCII letters, numbers, and punctuation (no other scripts or symbols).\n"
         f"Instruction: {task_description}\n"
         f"Current step: {step_idx}. Describe the visible scene and explain, step by step, the reasoning for the next action grounded in this frame.\n"
         "Respond with a concise chain-of-thought for this step."
@@ -80,7 +81,7 @@ def eval_libero():
     run_id = f"EVAL-{config.task_suite_name}-{config.model_family}-{utils.DATE_TIME}"
     os.makedirs(config.local_log_dir, exist_ok=True)
     local_log_filepath = os.path.join(config.local_log_dir, run_id + ".txt")
-    log_file = open(local_log_filepath, "w")
+    log_file = open(local_log_filepath, "w", encoding="utf-8")
     print(f"Logging to local log file: {local_log_filepath}")
 
     # 初始化LIBERO任务
