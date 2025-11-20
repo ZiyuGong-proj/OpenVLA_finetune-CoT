@@ -21,6 +21,12 @@ class Config:
     # 每个任务的最大时间步（超过则截断）
     max_steps: int = 220
 
+    # 是否在推理时为每一帧生成基于当前视觉的逐步 CoT
+    enable_frame_cot: bool = True
+
+    # 逐帧 CoT 的生成长度
+    cot_max_new_tokens: int = 128
+
     local_log_dir: str = "./experiments/logs"        # Local directory for eval logs
 
 

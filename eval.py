@@ -16,6 +16,21 @@ config = Config()
 DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 
 
+def build_frame_cot_prompt(task_description: str, step_idx: int) -> str:
+    return (
+        "You are a robot agent that must reason about the current frame only.\n"
+        f"Instruction: {task_description}\n"
+        f"Current step: {step_idx}. Describe the visible scene and explain, step by step, the reasoning for the next action grounded in this frame.\n"
+        "Respond with a concise chain-of-thought for this step."
+    )
+
+
+def strip_prompt_from_output(prompt: str, decoded_text: str) -> str:
+    if decoded_text.startswith(prompt):
+        return decoded_text[len(prompt) :].strip()
+    return decoded_text.strip()
+
+
 def eval_libero():
 
     assert config.pretrained_checkpoint is not None, "config.pretrained_checkpoint must not be None!"
@@ -57,7 +72,9 @@ def eval_libero():
     
     # 加载 processor , checkpoint =  "/mnt/workspace/openvla-7b-finetuned-libero-spatial"
     processor = AutoProcessor.from_pretrained(config.pretrained_checkpoint, trust_remote_code=True)
-    
+
+    model.eval()
+
 
     # 初始化日志
     run_id = f"EVAL-{config.task_suite_name}-{config.model_family}-{utils.DATE_TIME}"
@@ -134,15 +151,33 @@ def eval_libero():
 
                     # 缩放到模型视觉编码器的输入尺寸
                     img = utils.resize_image(img, (224, 224))
-                    
+                    current_pil_image = Image.fromarray(img).convert("RGB")
+
+                    if config.enable_frame_cot:
+                        cot_prompt = build_frame_cot_prompt(task_description, t)
+                        cot_inputs = processor(
+                            cot_prompt, current_pil_image, return_tensors="pt"
+                        ).to(DEVICE, dtype=torch.bfloat16)
+
+                        with torch.inference_mode():
+                            cot_output = model.generate(
+                                **cot_inputs, max_new_tokens=config.cot_max_new_tokens, do_sample=False
+                            )
+
+                        decoded_cot = processor.tokenizer.decode(cot_output[0], skip_special_tokens=True)
+                        cot_reasoning = strip_prompt_from_output(cot_prompt, decoded_cot)
+                        print(f"Step {t} CoT: {cot_reasoning}")
+                        log_file.write(f"Step {t} CoT: {cot_reasoning}\n")
+
                     # 构造提示词
                     prompt = f"In: What action should the robot take to {task_description.lower()}?\nOut:"
 
                     # 通过处理器得到模型输入
-                    inputs = processor(prompt, Image.fromarray(img).convert("RGB")).to(DEVICE, dtype=torch.bfloat16)
+                    inputs = processor(prompt, current_pil_image).to(DEVICE, dtype=torch.bfloat16)
 
                     # 模型推理，得到下一步的动作
-                    action = model.predict_action(**inputs, unnorm_key=config.unnorm_key, do_sample=False)
+                    with torch.inference_mode():
+                        action = model.predict_action(**inputs, unnorm_key=config.unnorm_key, do_sample=False)
                     # action.shape = (1, 7)
 
                     # 处理输出的 action，使其符合 LIBERO 的定义（LIBERO 中夹爪的控制量：-1 = open, +1 = close）
